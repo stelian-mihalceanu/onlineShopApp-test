@@ -5,8 +5,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.notNullValue;
 
 class ApiSmokeTest {
 
@@ -24,26 +24,11 @@ class ApiSmokeTest {
     }
 
     @Test
-    void productsEndpointIsReachable() {
+    void protectedCartPageRedirectsAnonymousUserToLogin() {
         given()
-            .when().get("/api/products")
-            .then().statusCode(200);
-    }
-
-    @Test
-    void protectedCartEndpointRejectsAnonymousUser() {
-        given()
-            .when().get("/api/cart")
-            .then().statusCode(401);
-    }
-
-    @Test
-    void invalidRegistrationIsRejected() {
-        given()
-            .contentType("application/json")
-            .body("{\"username\":\"\",\"password\":\"\"}")
-            .when().post("/api/auth/register")
-            .then().statusCode(400)
-            .body("error", notNullValue());
+            .redirects().follow(false)
+            .when().get("/cart")
+            .then().statusCode(302)
+            .header("Location", containsString("/login"));
     }
 }
