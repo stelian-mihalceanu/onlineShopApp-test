@@ -13,7 +13,7 @@ permissions:
 jobs:
   qa:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
@@ -40,13 +40,18 @@ jobs:
           path: onlineShopApp
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: maven
 
-      - name: Build and test production application
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      - name: Build and test production backend
         working-directory: onlineShopApp/onlinestore
         env:
           SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/onlinestore
@@ -68,7 +73,7 @@ jobs:
           SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/onlinestore
           SPRING_DATASOURCE_USERNAME: postgres
           SPRING_DATASOURCE_PASSWORD: postgres
-          PORT: 8080
+          SERVER_PORT: 8080
         run: |
           nohup java -jar target/onlinestore-0.0.1-SNAPSHOT.jar > "$GITHUB_WORKSPACE/app.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/app.pid"
@@ -84,11 +89,14 @@ jobs:
           cat app.log
           exit 1
 
-      - name: Run external API tests
-        run: mvn -B test -DbaseUrl=http://127.0.0.1:8080
+      - name: Run backend API tests
+        run: mvn -B test -DbaseUrl=http://127.0.0.1:8080 -Dtest='Api*Test'
 
-      - name: Run external Selenium tests
-        run: mvn -B -DbaseUrl=http://127.0.0.1:8080 -DwebdriverHeadless=true -Dtest=SeleniumCheckoutTest test
+      - name: Run frontend tests
+        run: mvn -B test -DbaseUrl=http://127.0.0.1:8080 -DwebdriverHeadless=true -Dtest=FrontendPagesTest
+
+      - name: Run end-to-end checkout test
+        run: mvn -B test -DbaseUrl=http://127.0.0.1:8080 -DwebdriverHeadless=true -Dtest=SeleniumCheckoutTest
 
       - name: Upload application log
         if: always()
@@ -96,4 +104,13 @@ jobs:
         with:
           name: onlineShopApp-qa-logs
           path: app.log
+          if-no-files-found: warn
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onlineShopApp-qa-reports
+          path: |
+            target/surefire-reports/**
           if-no-files-found: warn
