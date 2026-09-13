@@ -1,0 +1,99 @@
+name: onlineShopApp QA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: onlinestore
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d onlinestore"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout QA project
+        uses: actions/checkout@v4
+
+      - name: Checkout production application
+        uses: actions/checkout@v4
+        with:
+          repository: stelian-mihalceanu/onlineShopApp
+          path: onlineShopApp
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build and test production application
+        working-directory: onlineShopApp/onlinestore
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/onlinestore
+          SPRING_DATASOURCE_USERNAME: postgres
+          SPRING_DATASOURCE_PASSWORD: postgres
+        run: ./mvnw -B test
+
+      - name: Package production application
+        working-directory: onlineShopApp/onlinestore
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/onlinestore
+          SPRING_DATASOURCE_USERNAME: postgres
+          SPRING_DATASOURCE_PASSWORD: postgres
+        run: ./mvnw -B -DskipTests package
+
+      - name: Start production application
+        working-directory: onlineShopApp/onlinestore
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/onlinestore
+          SPRING_DATASOURCE_USERNAME: postgres
+          SPRING_DATASOURCE_PASSWORD: postgres
+          PORT: 8080
+        run: |
+          nohup java -jar target/onlinestore-0.0.1-SNAPSHOT.jar > "$GITHUB_WORKSPACE/app.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/app.pid"
+
+      - name: Wait for application health
+        run: |
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/actuator/health | grep -q '"status":"UP"'; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat app.log
+          exit 1
+
+      - name: Run external API tests
+        run: mvn -B test -DbaseUrl=http://127.0.0.1:8080
+
+      - name: Run external Selenium tests
+        run: mvn -B -DbaseUrl=http://127.0.0.1:8080 -DwebdriverHeadless=true -Dtest=SeleniumCheckoutTest test
+
+      - name: Upload application log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onlineShopApp-qa-logs
+          path: app.log
+          if-no-files-found: warn
